@@ -275,6 +275,7 @@ Ingress NGINX развёрнут как DaemonSet с `hostNetwork: true`. Это
 
 > Вся инфраструктура спроектирована и построена с нуля в 2025–2026 году.  
 > Kubernetes кластер развёрнут за 3 месяца активной разработки.
+> This repository contains sanitized, production-ready architectural templates and configuration concepts. No real production secrets, private keys, or internal IP addresses are exposed.
 
 ---
 
