@@ -1,0 +1,86 @@
+name: app-production-build
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: smart-kaniko-build
+        run: |
+          # Проверяем, какие файлы изменились в коммите
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "Dockerfile")
+          echo "Changed files: $CHANGED"
+
+          BUILD_ID="kaniko-builder-${GITHUB_RUN_NUMBER}"
+          REGISTRY="gitea-registry.internal"
+          USER="robot-ci-user"
+          TOKEN="${{ secrets.GITEA_REGISTRY_TOKEN }}"
+          PROXY_URL="http://proxy.example.edu.kz:3128" # Заменено на шаблон прокси
+          NAMESPACE="gitea-runner"
+          TARGET_NAMESPACE="university-apps"
+          DEPLOYMENT_NAME="student-portal-deployment"
+
+          if echo "$CHANGED" | grep -qE "Dockerfile|nginx.*\.conf"; then
+            echo "--- [Внимание] Изменился Dockerfile или конфиг Nginx — Запуск Kaniko сборки нового образа ---"
+
+            rm -rf ./* .* 2>/dev/null || true
+            git -c http.sslVerify=false clone --depth=1 --single-branch --branch main \
+              https://oauth2:${TOKEN}@${REGISTRY}/infrastructure/app-repository.git .
+
+            # Создание авторизационного конфига для реестра контейнеров (Registry)
+            AUTH=$(echo -n "$USER:${{ secrets.GITEA_REGISTRY_PASSWORD }}" | base64 | tr -d '\n')
+            mkdir -p .docker
+            echo "{\"auths\":{\"$REGISTRY\":{\"auth\":\"$AUTH\"}}}" > .docker/config.json
+
+            /usr/bin/kubectl delete pod $BUILD_ID -n $NAMESPACE 2>/dev/null || true
+
+            # Запуск эфемерного Пода Kaniko в кластере для безопасной сборки
+            /usr/bin/kubectl run $BUILD_ID -n $NAMESPACE \
+              --restart=Never \
+              --image=gcr.io/kaniko-project/executor:v1.20.0 \
+              --overrides='{
+                "spec": {
+                  "containers": [{
+                    "name": "kaniko",
+                    "image": "gcr.io/kaniko-project/executor:v1.20.0",
+                    "args": [
+                      "--context=dir:///workspace",
+                      "--dockerfile=Dockerfile",
+                      "--destination='"$REGISTRY"'/infrastructure/app-production:latest",
+                      "--insecure",
+                      "--skip-tls-verify",
+                      "--build-arg=HTTP_PROXY='"$PROXY_URL"'",
+                      "--build-arg=HTTPS_PROXY='"$PROXY_URL"'"
+                    ],
+                    "volumeMounts": [{"name": "source", "mountPath": "/workspace"}]
+                  }],
+                  "volumes": [{"name": "source", "emptyDir": {}}]
+                }
+              }'
+
+            /usr/bin/kubectl wait --for=condition=Initialized pod/$BUILD_ID -n $NAMESPACE --timeout=120s
+            /usr/bin/kubectl logs -f $BUILD_ID -c kaniko -n $NAMESPACE 2>/dev/null || true
+            /usr/bin/kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/$BUILD_ID \
+              -n $NAMESPACE --timeout=600s || true
+
+            EXIT_CODE=$(/usr/bin/kubectl get pod $BUILD_ID -n $NAMESPACE \
+              -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null)
+
+            if [ "$EXIT_CODE" = "0" ]; then
+              echo "--- Сборка Kaniko завершена успешно. Выполняется Rolling Update ---"
+              /usr/bin/kubectl rollout restart deployment/$DEPLOYMENT_NAME -n $TARGET_NAMESPACE
+              /usr/bin/kubectl rollout status deployment/$DEPLOYMENT_NAME -n $TARGET_NAMESPACE
+            else
+              echo "--- [Ошибка] Сборка образа провалена! ---"
+              exit 1
+            fi
+
+          else
+            echo "--- Изменился только PHP/CSS/JS код. Пропускаем сборку "тяжелого" Docker-образа ---"
+            echo "--- Выполняем быстрый перезапуск подов (код подтянется из смонтированного NFS-тома) ---"
+            /usr/bin/kubectl rollout restart deployment/$DEPLOYMENT_NAME -n $TARGET_NAMESPACE
+            /usr/bin/kubectl rollout status deployment/$DEPLOYMENT_NAME -n $TARGET_NAMESPACE
+          fi

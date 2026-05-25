@@ -1,0 +1,91 @@
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app-horizontal-scaler
+  namespace: university-apps
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: student-portal-deployment
+  minReplicas: 2               # Изменено на минимум 2 для обеспечения высокой доступности (HA)
+  maxReplicas: 7               # Автоматический апскейл до 7 реплик в периоды пиковых нагрузок
+  targetCPUUtilizationPercentage: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: student-portal-deployment
+  namespace: university-apps
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate        # Бесперебойный деплой без простоя сервиса (Zero-Downtime Deployment)
+    rollingUpdate:
+      maxSurge: 1              # Разрешено временно запустить +1 под во время обновления
+      maxUnavailable: 0        # Ни один старый под не уничтожается, пока новый под не пройдет Readiness Probe
+  selector:
+    matchLabels:
+      app: student-portal
+  template:
+    metadata:
+      labels:
+        app: student-portal
+    spec:
+      imagePullSecrets:
+      - name: enterprise-gitea-registry-secret
+      containers:
+      - name: web-app
+        image: gitea-registry.internal/infrastructure/app-production:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: "200m"
+            memory: 512Mi
+        # Инъекция безопасных переменных окружения из декларативных секретов Kubernetes
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: production-db-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: production-db-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: production-db-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: production-db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: production-db-credentials
+              key: DB_PASSWORD
+        ports:
+        - containerPort: 80
+        # Монтирование персистентного сетевого NFS хранилища для файлов, кэша и вендоров
+        volumeMounts:
+        - name: shared-nfs-volume
+          mountPath: /var/www/html/profile_files
+          subPath: application/profile_files
+        - name: shared-nfs-volume
+          mountPath: /var/www/html/vendor
+          subPath: application/vendor
+        - name: shared-nfs-volume
+          mountPath: /var/www/html/runtime
+          subPath: application/runtime
+      volumes:
+      - name: shared-nfs-volume
+        persistentVolumeClaim:
+          claimName: shared-nfs-production-pvc
