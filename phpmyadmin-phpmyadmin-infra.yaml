@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phpmyadmin-servers-config
+  namespace: university-sites
+data:
+  config.user.inc.php: |
+    <?php
+    // Обезличенный криптографический ключ для cookie сессий
+    $cfg['blowfish_secret'] = 'ENTER_YOUR_DYNAMIC_RANDOM_BLOWFISH_SECRET_KEY_HERE';
+
+    $i = 1;
+    // Конфигурация подключения к изолированной СУБД (Основной контур)
+    $cfg['Servers'][$i]['verbose']   = 'Production-Main-Cluster';
+    $cfg['Servers'][$i]['host']      = 'db-cluster-isolated.internal';
+    $cfg['Servers'][$i]['port']      = '3306';
+    $cfg['Servers'][$i]['auth_type'] = 'cookie';
+    $cfg['Servers'][$i]['AllowNoPassword'] = false;
+
+    $i++;
+    // Дополнительный выделенный микросервисный контур приложений
+    $cfg['Servers'][$i]['verbose']   = 'Applications-Sub-Cluster';
+    $cfg['Servers'][$i]['host']      = 'db-cluster-isolated.internal';
+    $cfg['Servers'][$i]['port']      = '3307';
+    $cfg['Servers'][$i]['auth_type'] = 'cookie';
+    $cfg['Servers'][$i]['AllowNoPassword'] = false;
+
+    $i++;
+    // Изолированный СУБД Стенд тестирования и разработки (Staging)
+    $cfg['Servers'][$i]['verbose']   = 'Staging-Test-Environment';
+    $cfg['Servers'][$i]['host']      = 'db-staging-isolated.internal';
+    $cfg['Servers'][$i]['port']      = '3306';
+    $cfg['Servers'][$i]['auth_type'] = 'cookie';
+    $cfg['Servers'][$i]['AllowNoPassword'] = false;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: global-phpmyadmin
+  namespace: university-sites
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phpmyadmin
+  template:
+    metadata:
+      labels:
+        app: phpmyadmin
+    spec:
+      containers:
+      - name: phpmyadmin
+        image: phpmyadmin/phpmyadmin:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: PMA_ARBITRARY
+          value: "1" # Разрешает ручной ввод серверов при необходимости
+        volumeMounts:
+        - name: pma-config
+          mountPath: /etc/phpmyadmin/config.user.inc.php
+          subPath: config.user.inc.php
+      volumes:
+      - name: pma-config
+        configMap:
+          name: phpmyadmin-servers-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: phpmyadmin-service
+  namespace: university-sites
+spec:
+  type: ClusterIP
+  selector:
+    app: phpmyadmin
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: phpmyadmin-ingress
+  namespace: university-sites
+  annotations:
+    # Важное архитектурное решение: Защита панели управления базой данных дополнительным слоем Basic Auth
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: pma-auth-secret
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - pma.example.edu.kz
+    secretName: wildcard-tls-cert
+  rules:
+  - host: pma.example.edu.kz
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: phpmyadmin-service
+            port:
+              number: 80

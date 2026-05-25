@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowser
+  namespace: university-sites
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filebrowser
+  template:
+    metadata:
+      labels:
+        app: filebrowser
+    spec:
+      securityContext:
+        # Безопасность: работа от выделенного системного UID/GID (не root)
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: filebrowser
+        image: filebrowser/filebrowser:latest
+        args:
+          - "--database"
+          - "/srv/data/internal/filebrowser.db"
+          - "--root"
+          - "/srv"
+          - "--port"
+          - "8080"
+          - "--address"
+          - "0.0.0.0"
+          - "--noauth=false"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: static-shared-data
+          mountPath: /srv
+      volumes:
+      - name: static-shared-data
+        persistentVolumeClaim:
+          claimName: shared-nfs-static-pvc # Указывает на монтирование внешнего NFS тома
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: filebrowser-svc
+  namespace: university-sites
+spec:
+  type: ClusterIP
+  selector:
+    app: filebrowser
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: filebrowser-ingress
+  namespace: university-sites
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Тюнинг Nginx Ingress для загрузки тяжелого медиа-контента и документов
+    nginx.ingress.kubernetes.io/proxy-body-size: "2048m" # Лимит до 2 ГБ
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - files.example.edu.kz
+    secretName: shared-wildcard-tls
+  rules:
+  - host: files.example.edu.kz
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: filebrowser-svc
+            port:
+              number: 80

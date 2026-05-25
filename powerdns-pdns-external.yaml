@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pdns-external
+  namespace: powerdns
+  labels:
+    app: pdns-auth-external
+spec:
+  selector:
+    matchLabels:
+      app: pdns-auth-external
+  template:
+    metadata:
+      labels:
+        app: pdns-auth-external
+    spec:
+      # Важное архитектурное решение: биндинг напрямую на порты физического хоста для минимизации задержек DNS (UDP/TCP 53)
+      hostNetwork: true
+      nodeSelector:
+        dns-type: "external"
+      tolerations:
+      - key: "app"
+        operator: "Equal"
+        value: "powerdns"
+        effect: "NoSchedule"
+      containers:
+      - name: pdns
+        image: powerdns/pdns-auth-48:latest
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        ports:
+          - containerPort: 8081
+            hostPort: 8081
+            protocol: TCP
+        env:
+          - name: PDNS_launch
+            value: "gpgsql"
+          - name: PDNS_gpgsql_host
+            valueFrom: { secretKeyRef: { name: pdns-db-secrets, key: ext_host } }
+          - name: PDNS_gpgsql_port
+            value: "5433"
+          - name: PDNS_gpgsql_dbname
+            valueFrom: { secretKeyRef: { name: pdns-db-secrets, key: ext_db } }
+          - name: PDNS_gpgsql_user
+            valueFrom: { secretKeyRef: { name: pdns-db-secrets, key: ext_user } }
+          - name: PDNS_gpgsql_password
+            valueFrom: { secretKeyRef: { name: pdns-db-secrets, key: ext_pw } }
+          - name: PDNS_api
+            value: "yes"
+          - name: PDNS_api_key
+            valueFrom: { secretKeyRef: { name: pdns-db-secrets, key: api_key } }
+          - name: PDNS_webserver
+            value: "yes"
+          - name: PDNS_webserver_address
+            value: "0.0.0.0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdns-admin-external
+  namespace: powerdns
+spec:
+  replicas: 3 # Высокая доступность (HA) для панели управления внешними зонами
+  selector:
+    matchLabels:
+      app: pdns-admin-external
+  template:
+    metadata:
+      labels:
+        app: pdns-admin-external
+    spec:
+      nodeSelector:
+        dns-type: "external"
+      hostNetwork: false
+      tolerations:
+      - key: "app"
+        operator: "Equal"
+        value: "powerdns"
+        effect: "NoSchedule"
+      containers:
+      - name: pdns-admin
+        image: powerdnsadmin/pda-legacy:latest
+        ports:
+          - containerPort: 80
+        env:
+         - name: SQLALCHEMY_DATABASE_URI
+           value: "postgresql://pdns_external_user:YOUR_SECURE_EXTERNAL_DB_PASSWORD@db-cluster-isolated.internal:5433/pdns_external_prod"
+         - name: GUNICORN_TIMEOUT
+           value: "60"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdns-external-svc
+  namespace: powerdns
+spec:
+  selector:
+    app: pdns-auth-external
+  ports:
+    - name: dns-udp
+      protocol: UDP
+      port: 53
+      targetPort: 53
+    - name: dns-tcp
+      protocol: TCP
+      port: 53
+      targetPort: 53
+    - name: api
+      protocol: TCP
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdns-admin-external-service
+  namespace: powerdns
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    app: pdns-admin-external

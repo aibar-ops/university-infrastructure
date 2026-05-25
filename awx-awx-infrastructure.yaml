@@ -1,0 +1,90 @@
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx
+  namespace: awx
+spec:
+  # Шаблон подключения к внешней изолированной БД
+  postgres_configuration_secret: awx-external-db-secret
+  replicas: 2
+  web_replicas: 2
+  task_replicas: 2
+
+  # Привязка к выделенным нодам автоматизации
+  web_node_selector: |
+    node-role.kubernetes.io/automation: "true"
+  task_node_selector: |
+    node-role.kubernetes.io/automation: "true"
+
+  # Работа на нодах со специфичными тейнтами (Taints)
+  web_tolerations: |
+    - key: "node-role.kubernetes.io/automation"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "node.kubernetes.io/unreachable"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 30
+    - key: "node.kubernetes.io/not-ready"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 30
+
+  task_tolerations: |
+    - key: "node-role.kubernetes.io/automation"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "node.kubernetes.io/unreachable"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 30
+    - key: "node.kubernetes.io/not-ready"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 30
+
+  # Повышение отказоустойчивости: разнос реплик веб и тасков по разным физическим хостам
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - awx-web
+          topologyKey: "kubernetes.io/hostname"
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - awx-task
+          topologyKey: "kubernetes.io/hostname"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: awx-ingress
+  namespace: awx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - awx.example.edu.kz
+    secretName: awx-tls-cert
+  rules:
+  - host: awx.example.edu.kz
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: awx-service
+            port:
+              number: 80

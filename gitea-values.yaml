@@ -1,0 +1,76 @@
+# 1. Глобальные настройки Gitea для работы с внешним кластером баз данных
+externalDatabase:
+  host: "db-cluster-external.internal" # Изолированный IP/Хост БД
+  port: 5432
+  user: "gitea_user"
+  password: "YOUR_SECURE_DATABASE_PASSWORD" # Заменено на заглушку
+  database: "gitea_production"
+
+gitea:
+  config:
+    server:
+      DOMAIN: gitea.example.edu.kz
+      ROOT_URL: https://gitea.example.edu.kz/
+    database:
+      DB_TYPE: postgres
+      HOST: "db-cluster-external.internal" 
+      PORT: 5432
+      NAME: "gitea_production"
+      USER: "gitea_user"
+      PASSWD: "YOUR_SECURE_DATABASE_PASSWORD"
+  admin:
+    username: repo_admin
+    password: YOUR_SECURE_ADMIN_PASSWORD
+    email: admin@example.edu.kz
+
+# 2. Настройки Ingress и SSL
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: gitea.example.edu.kz
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: gitea-tls-cert
+      hosts:
+        - gitea.example.edu.kz
+
+# 3. Привязка ресурсов к выделенному пулу инфраструктурных нод
+nodeSelector:
+  nodepool: cicd-runners
+tolerations:
+  - key: "nodepool"
+    operator: "Equal"
+    value: "cicd-runners"
+    effect: "NoSchedule"
+
+# 4. Внутренняя БД — отключена (Используется Enterprise внешний подход для надежности данных)
+postgresql:
+  enabled: false
+
+postgresql-ha:
+  enabled: false
+
+# 5. Кэш Valkey / Redis внутри кластера
+valkey:
+  enabled: true
+  nodeSelector:
+    nodepool: cicd-runners
+  tolerations:
+    - key: "nodepool"
+      operator: "Equal"
+      value: "cicd-runners"
+      effect: "NoSchedule"
+
+valkey-cluster:
+  enabled: false
+
+# 6. Персистентное хранилище для репозиториев
+persistence:
+  enabled: true
+  size: 50Gi
