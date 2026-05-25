@@ -1,9 +1,8 @@
-# 🏛️ Buketov University — Enterprise Kubernetes Infrastructure
+# 🏛️ Buketov University Kubernetes Infrastructure
 
-> Production-grade infrastructure for Karaganda Buketov University  
-> Designed, built and maintained by **Aibar Abil** — Systems/DevOps Engineer
+**Production-grade Kubernetes инфраструктура** для Карагандинского университета им. Букетова.
 
----
+> Спроектирована и реализована **Айбаром Абилом** — Systems/DevOps Engineer.
 
 ## 📊 Масштаб инфраструктуры
 
@@ -15,8 +14,38 @@
 | 📦 Подов в кластере | 114+ |
 | 🌐 Production сайтов | 50+ |
 | 👥 Пользователей | 10 000+ (студенты, преподаватели, сотрудники) |
-| 💾 Данных на NFS | 259 ГБ |
+| 💾 Данных на NFS | 1024+ ГБ |
 | 🤖 AWX хостов под управлением | 103 |
+
+---
+
+## 📅 Хронология проекта
+
+- **Январь 2025** — Начало работы в должности системного администратора
+- **2025 год** — Глубокое изучение существующей инфраструктуры университета
+- **Декабрь 2025** — Проектирование новой архитектуры (High-Level Design)
+- **Январь — 20 марта 2026** — Реализация кластера с нуля (**первый опыт с Kubernetes**)
+- **20 марта — 1 мая 2026** — Перерыв
+- **С 1 мая 2026 — настоящее время** — Поддержка, стабилизация и развитие (миграция сайтов на GitOps + CI/CD)
+
+---
+
+## 🎯 О проекте
+
+Данный репозиторий содержит всю инфраструктуру Kubernetes, которую я спроектировал и внедрил практически с нуля в университете.
+
+**Это мой первый крупный Kubernetes проект.** До конца 2025 года у меня не было опыта работы с Kubernetes. За 3–4 месяца активной разработки удалось поднять стабильную, отказоустойчивую и безопасную инфраструктуру enterprise-уровня.
+
+---
+
+## 🏗️ Архитектура
+
+### Основные принципы:
+- **High Availability** — 3 control-plane ноды
+- **Изоляция** — Базы данных вынесены за пределы Kubernetes
+- **Security** — Non-root контейнеры, taints/tolerations, PodAntiAffinity, RBAC
+- **Performance** — Ingress и PowerDNS на `hostNetwork`
+- **GitOps** — Переход на Gitea + Kaniko runners (в процессе)
 
 ---
 
@@ -261,8 +290,6 @@ Ingress NGINX развёрнут как DaemonSet с `hostNetwork: true`. Это
 | Zabbix | ✅ Production | zabbix |
 | Grafana + InfluxDB | ✅ Production | telemetria / monitoring |
 | phpMyAdmin | ✅ Production | university-sites |
-| Wazuh SIEM | 🔧 In Development | wazuh |
-| Moodle | 🔧 In Development | university-sites |
 
 ---
 
@@ -273,7 +300,7 @@ Ingress NGINX развёрнут как DaemonSet с `hostNetwork: true`. Это
 📧 abilaibar@gmail.com  
 📍 Казахстан, Караганда
 
-> Вся инфраструктура спроектирована и построена с нуля в 2025–2026 году.  
+> Вся инфраструктура спроектирована и построена с нуля в 2025-2026 году.  
 > Kubernetes кластер развёрнут за 3 месяца активной разработки.
 > This repository contains sanitized, production-ready architectural templates and configuration concepts. No real production secrets, private keys, or internal IP addresses are exposed.
 
